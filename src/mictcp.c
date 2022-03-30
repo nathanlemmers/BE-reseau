@@ -1,9 +1,10 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
- mic_tcp_sock sock;
+
+mic_tcp_sock sock;
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
- * Retourne le descripteur du socket ou bien -1 en cas d'erreur
+ * Retourne le descripteur du socket ou bien -1 en cas d'pkt_loss
  */
 int mic_tcp_socket(start_mode sm)
 {
@@ -22,8 +23,8 @@ int mic_tcp_socket(start_mode sm)
    
 }
 
-float pourcent = 20/100 ;
-
+float taux_accept = 1 ;
+int fenetre = 5 ;
 /*
  * Permet d’attribuer une adresse à un socket.
  * Retourne 0 si succès, et -1 en cas d’échec
@@ -36,7 +37,7 @@ int mic_tcp_bind(int socket, mic_tcp_sock_addr addr)
 
 /*
  * Met le socket en état d'acceptation de connexions
- * Retourne 0 si succès, -1 si erreur
+ * Retourne 0 si succès, -1 si pkt_loss
  */
 int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 {
@@ -57,15 +58,15 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
     // pdu.header.dest_port=9000 ;
     // mic_tcp_pdu pdu2 ;
     // if (IP_send(pdu, addr1)==-1){
-    //     printf("Erreur sur le syn\n") ;
+    //     printf("pkt_loss sur le syn\n") ;
     // }
     // while ((IP_recv(&pdu2, &addr, 2000)==-1)|| pdu2.header.syn==0 || pdu2.header.ack==0)  {
     //     if (IP_send(pdu, addr)==-1){
-    //     printf("Erreur sur l'ack\n") ;
+    //     printf("pkt_loss sur l'ack\n") ;
     // }
     // pdu.header.ack=1 ;
     // if (IP_send(pdu, addr1)==-1){
-    //     printf("Erreur sur l'ack\n") ;
+    //     printf("pkt_loss sur l'ack\n") ;
     //}
 
 
@@ -78,37 +79,67 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
 
 /*
  * Permet de réclamer l’envoi d’une donnée applicative
- * Retourne la taille des données envoyées, et -1 en cas d'erreur
+ * Retourne la taille des données envoyées, et -1 en cas d'pkt_loss
  */
 int PE=0 ;
-int compteur=0;
-int erreur=0 ;
+int cpt_pkt = 0;
+int pkt_loss = 0 ;
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    if (mic_sock==sock.fd) {
+    
+    if (mic_sock == sock.fd) {
+        
         mic_tcp_pdu pdu ;
+        
+        // Construction du pdu
         pdu.payload.data=mesg;
         pdu.payload.size=mesg_size ;
         pdu.header.source_port=5000 ;
         pdu.header.dest_port=9000 ;
         pdu.header.seq_num=PE ;
+        
         int size ;
         mic_tcp_pdu pdu2 ;
+        
         int boolean=1;
-        if((size=IP_send(pdu,addr))==-1) {
-            printf("Erreur au moment du send \n") ;
+
+        /* Réinitialisatiion du compteur  */
+        
+        if (cpt_pkt == fenetre){
+            cpt_pkt = 0 ;
+            pkt_loss = 0;
         }
+
+        /* Transmission du payload */
+        
+        if((size=IP_send(pdu,addr))==-1) {
+            printf("pkt_loss au moment du send \n") ;
+        }
+
         while (boolean){
-            if (IP_recv(&pdu2,&addr,30)==-1){
-                if((size=IP_send(pdu,addr))==-1) {
-                    printf("Erreur au moment du send \n") ;
-                    exit(1) ;
+
+            /* Attente d'un ack */
+            
+            if (IP_recv(&pdu2,&addr,30) == -1){
+                
+                if (pkt_loss < (taux_accept)){
+                    pkt_loss++ ;
+                    boolean = 0 ;
+                }
+                else if((size=IP_send(pdu,addr))==-1) {
+                    printf("pkt_loss au moment du send \n") ;
+                    exit(1) ; //continue;
                 }
             }
-            else if (pdu2.header.ack_num!=PE){
-                if((size=IP_send(pdu,addr))==-1) {
-                    printf("Erreur au moment du send \n") ;
+            else if (pdu2.header.ack_num != PE){
+                
+                if (pkt_loss<(taux_accept)){
+                    pkt_loss++ ;
+                    boolean = 0 ;
+                }
+                else if((size=IP_send(pdu,addr))==-1) {
+                    printf("pkt_loss au moment du send \n") ;
                     exit(1) ;
                 }
             }
@@ -117,7 +148,9 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             }
         }
         PE++ ;
-        compteur++ ;
+        cpt_pkt++ ;
+        printf("%d,\n", cpt_pkt) ;
+        printf("%d,\n", pkt_loss) ;
         return size ;
     }
     return -1 ;
@@ -126,7 +159,7 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 /*
  * Permet à l’application réceptrice de réclamer la récupération d’une donnée
  * stockée dans les buffers de réception du socket
- * Retourne le nombre d’octets lu ou bien -1 en cas d’erreur
+ * Retourne le nombre d’octets lu ou bien -1 en cas d’pkt_loss
  * NB : cette fonction fait appel à la fonction app_buffer_get()
  */
 int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
@@ -142,11 +175,6 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
     return size;
 }
 
-/*
- * Permet de réclamer la destruction d’un socket.
- * Engendre la fermeture de la connexion suivant le modèle de TCP.
- * Retourne 0 si tout se passe bien et -1 en cas d'erreur
- */
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
@@ -167,14 +195,24 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     pdu2.header.source_port=9000 ;
     pdu2.header.dest_port=5000 ;
     if (IP_send(pdu2,addr)==-1){
-        printf("Erreur au moment du send\n") ;
+        printf("pkt_loss au moment du send\n") ;
         exit(1);
     }
-    if (pdu2.header.ack_num==PA){
-        PA++ ;
-
+    if (pdu2.header.ack_num >= PA){
+        PA+=pdu2.header.ack_num-PA+1 ;
         app_buffer_put(pdu.payload) ;
     }
     
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
+    //pdu récu
+
+    // Désencapsuler
+
+    // Vérifie est-ce que c'est le paquet à transmettre à l'application ==> Vérification numéro de séquence
+
+    //Si c'est bon ==> app_buffer_put
+    // Envoi d'un ack
+
+    //sinon envoi un ack avec le dernier numéro de séquence
 }
