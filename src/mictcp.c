@@ -14,13 +14,15 @@ int mic_tcp_socket(start_mode sm)
    if (result==-1) {
        return -1 ;
    } else {
-        set_loss_rate(9);
+        set_loss_rate(50);
         sock.fd=1 ;
         sock.state = CLOSED ;
         return sock.fd;
    }
    
 }
+
+float pourcent = 20/100 ;
 
 /*
  * Permet d’attribuer une adresse à un socket.
@@ -79,6 +81,8 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
  * Retourne la taille des données envoyées, et -1 en cas d'erreur
  */
 int PE=0 ;
+int compteur=0;
+int erreur=0 ;
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
@@ -91,18 +95,29 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         pdu.header.seq_num=PE ;
         int size ;
         mic_tcp_pdu pdu2 ;
+        int boolean=1;
         if((size=IP_send(pdu,addr))==-1) {
             printf("Erreur au moment du send \n") ;
         }
-        while ((IP_recv(&pdu2,&addr,30))==-1){
-            if (pdu2.header.ack!=PE){
+        while (boolean){
+            if (IP_recv(&pdu2,&addr,30)==-1){
                 if((size=IP_send(pdu,addr))==-1) {
-                printf("Erreur au moment du send \n") ;
-                exit(1) ;
+                    printf("Erreur au moment du send \n") ;
+                    exit(1) ;
                 }
+            }
+            else if (pdu2.header.ack_num!=PE){
+                if((size=IP_send(pdu,addr))==-1) {
+                    printf("Erreur au moment du send \n") ;
+                    exit(1) ;
+                }
+            }
+            else {
+                boolean=0 ;
             }
         }
         PE++ ;
+        compteur++ ;
         return size ;
     }
     return -1 ;
@@ -157,7 +172,9 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     }
     if (pdu2.header.ack_num==PA){
         PA++ ;
+
         app_buffer_put(pdu.payload) ;
     }
+    
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
 }
