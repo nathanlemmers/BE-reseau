@@ -17,7 +17,7 @@ int mic_tcp_socket(start_mode sm)
    if (result==-1) {
        return -1 ;
    } else {
-        set_loss_rate(70);
+        set_loss_rate(5);
         sock.fd=1 ;
         sock.state = CLOSED ;
         return sock.fd;
@@ -25,7 +25,7 @@ int mic_tcp_socket(start_mode sm)
    
 }
 //Taux accept=nombre d'erreur acceptable sur la fenetre donnée, ici, 5 erreur sont acceptables sur la fenetre de 20.
-float taux_accept = 5 ;
+float taux_accept = 1 ;
 //int FENETRE = 5 ;
 /*
  * Permet d’attribuer une adresse à un socket.
@@ -54,26 +54,36 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 mic_tcp_sock_addr addr ;
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
 {
-    // mic_tcp_pdu pdu ;
-    // pdu.header.syn=1 ;
-    // pdu.header.source_port=5000 ;
-    // pdu.header.dest_port=9000 ;
-    // mic_tcp_pdu pdu2 ;
-    // if (IP_send(pdu, addr1)==-1){
-    //     printf("pkt_loss sur le syn\n") ;
-    // }
-    // while ((IP_recv(&pdu2, &addr, 2000)==-1)|| pdu2.header.syn==0 || pdu2.header.ack==0)  {
-    //     if (IP_send(pdu, addr)==-1){
-    //     printf("pkt_loss sur l'ack\n") ;
-    // }
-    // pdu.header.ack=1 ;
-    // if (IP_send(pdu, addr1)==-1){
-    //     printf("pkt_loss sur l'ack\n") ;
-    //}
-
-
-
-
+    mic_tcp_pdu pdu ;
+    int boolean=1 ;
+    pdu.header.syn=1 ;
+    pdu.header.source_port=5000 ;
+    pdu.header.dest_port=9000 ;
+    mic_tcp_pdu pdu2 ;
+    if (IP_send(pdu, addr1)==-1){
+        printf("pkt_loss sur le syn\n") ;
+    }
+    //socket.state=SYN_SENT ;
+    while (boolean){
+        if (IP_recv(&pdu2, &addr, 2000)==-1){
+            if (IP_send(pdu, addr1)==-1){
+            printf("pkt_loss sur le syn\n") ;
+            }
+        }
+        else if (pdu2.header.syn==0 || pdu2.header.ack==0){
+            if (IP_send(pdu, addr)==-1){
+            printf("pkt_loss sur le syn\n") ;
+            }
+        }
+        else {
+            //socket.state=ESTABLISHED;
+            boolean=0 ;
+        }
+    }
+    pdu.header.ack=1 ;
+    if (IP_send(pdu, addr1)==-1){
+    printf("pkt_loss sur l'ack\n") ;
+    }
     printf("[MIC-TCP] Appel de la fonction: ");  printf(__FUNCTION__); printf("\n");
     addr = addr1 ;
     return 0;
@@ -188,7 +198,7 @@ int mic_tcp_recv (int socket, char* mesg, int max_mesg_size)
 int mic_tcp_close (int socket)
 {
     printf("[MIC-TCP] Appel de la fonction :  "); printf(__FUNCTION__); printf("\n");
-    return -1;
+    return 0;
 }
 
 /*
