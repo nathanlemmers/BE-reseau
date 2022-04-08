@@ -1,6 +1,8 @@
 #include <mictcp.h>
 #include <api/mictcp_core.h>
 
+#define FENETRE 20
+
 mic_tcp_sock sock;
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
@@ -15,16 +17,16 @@ int mic_tcp_socket(start_mode sm)
    if (result==-1) {
        return -1 ;
    } else {
-        set_loss_rate(50);
+        set_loss_rate(70);
         sock.fd=1 ;
         sock.state = CLOSED ;
         return sock.fd;
    }
    
 }
-
-float taux_accept = 1 ;
-int fenetre = 5 ;
+//Taux accept=nombre d'erreur acceptable sur la fenetre donnée, ici, 5 erreur sont acceptables sur la fenetre de 20.
+float taux_accept = 5 ;
+//int FENETRE = 5 ;
 /*
  * Permet d’attribuer une adresse à un socket.
  * Retourne 0 si succès, et -1 en cas d’échec
@@ -83,11 +85,21 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
  */
 int PE=0 ;
 int cpt_pkt = 0;
-int pkt_loss = 0 ;
+
+
+int somme (int tab[], int size){
+    int som=0 ;
+    for (int i=0; i<size ; i++){
+        som+=tab[i] ;
+    }
+    return som ;
+}
+
+
 int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
 {
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
-    
+    static int tabl[FENETRE] = {0};
     if (mic_sock == sock.fd) {
         
         mic_tcp_pdu pdu ;
@@ -100,15 +112,14 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
         pdu.header.seq_num=PE ;
         
         int size ;
-        mic_tcp_pdu pdu2 ;
+        mic_tcp_pdu pdu2 = {0} ;
         
         int boolean=1;
 
         /* Réinitialisatiion du compteur  */
         
-        if (cpt_pkt == fenetre){
+        if (cpt_pkt == FENETRE){
             cpt_pkt = 0 ;
-            pkt_loss = 0;
         }
 
         /* Transmission du payload */
@@ -122,10 +133,9 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             /* Attente d'un ack */
             
             if (IP_recv(&pdu2,&addr,30) == -1){
-                
-                if (pkt_loss < (taux_accept)){
-                    pkt_loss++ ;
+                if (somme(tabl, FENETRE) < (taux_accept)){
                     boolean = 0 ;
+                    tabl[cpt_pkt]=1 ;
                 }
                 else if((size=IP_send(pdu,addr))==-1) {
                     printf("pkt_loss au moment du send \n") ;
@@ -133,9 +143,8 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 }
             }
             else if (pdu2.header.ack_num != PE){
-                
-                if (pkt_loss<(taux_accept)){
-                    pkt_loss++ ;
+                if (somme(tabl, FENETRE)<(taux_accept)){
+                    tabl[cpt_pkt]=1 ;
                     boolean = 0 ;
                 }
                 else if((size=IP_send(pdu,addr))==-1) {
@@ -144,13 +153,14 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
                 }
             }
             else {
+                tabl[cpt_pkt]=0 ;
                 boolean=0 ;
+                PE++ ;
             }
         }
-        PE++ ;
         cpt_pkt++ ;
         printf("%d,\n", cpt_pkt) ;
-        printf("%d,\n", pkt_loss) ;
+        printf("%d,\n", somme(tabl,FENETRE)) ;
         return size ;
     }
     return -1 ;
@@ -198,7 +208,7 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
         printf("pkt_loss au moment du send\n") ;
         exit(1);
     }
-    if (pdu2.header.ack_num >= PA){
+    if (pdu2.header.ack_num == PA){
         PA+=pdu2.header.ack_num-PA+1 ;
         app_buffer_put(pdu.payload) ;
     }
