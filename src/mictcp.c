@@ -4,6 +4,8 @@
 #define FENETRE 20
 
 mic_tcp_sock sock;
+
+
 /*
  * Permet de créer un socket entre l’application et MIC-TCP
  * Retourne le descripteur du socket ou bien -1 en cas d'pkt_loss
@@ -17,9 +19,9 @@ int mic_tcp_socket(start_mode sm)
    if (result==-1) {
        return -1 ;
    } else {
-        set_loss_rate(5);
+        set_loss_rate(0);
         sock.fd=1 ;
-        sock.state = CLOSED ;
+        sock.state = IDLE ;
         return sock.fd;
    }
    
@@ -54,7 +56,8 @@ int mic_tcp_accept(int socket, mic_tcp_sock_addr* addr)
 mic_tcp_sock_addr addr ;
 int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
 {
-    mic_tcp_pdu pdu ;
+   mic_tcp_pdu pdu = {0} ;
+   printf("Entrée dans le connect\n") ;
     int boolean=1 ;
     pdu.header.syn=1 ;
     pdu.header.source_port=5000 ;
@@ -63,20 +66,20 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
     if (IP_send(pdu, addr1)==-1){
         printf("pkt_loss sur le syn\n") ;
     }
-    //socket.state=SYN_SENT ;
+    sock.state=SYN_SENT ;
     while (boolean){
-        if (IP_recv(&pdu2, &addr, 2000)==-1){
+        if (IP_recv(&pdu2, &addr, 5)==-1){
             if (IP_send(pdu, addr1)==-1){
             printf("pkt_loss sur le syn\n") ;
             }
         }
         else if (pdu2.header.syn==0 || pdu2.header.ack==0){
-            if (IP_send(pdu, addr)==-1){
+            if (IP_send(pdu, addr1)==-1){
             printf("pkt_loss sur le syn\n") ;
             }
         }
         else {
-            //socket.state=ESTABLISHED;
+            sock.state=ESTABLISHED;
             boolean=0 ;
         }
     }
@@ -93,7 +96,7 @@ int mic_tcp_connect(int socket, mic_tcp_sock_addr addr1)
  * Permet de réclamer l’envoi d’une donnée applicative
  * Retourne la taille des données envoyées, et -1 en cas d'pkt_loss
  */
-int PE=0 ;
+int PE=0 ; 
 int cpt_pkt = 0;
 
 
@@ -145,15 +148,6 @@ int mic_tcp_send (int mic_sock, char* mesg, int mesg_size)
             if (IP_recv(&pdu2,&addr,30) == -1){
                 if (somme(tabl, FENETRE) < (taux_accept)){
                     boolean = 0 ;
-                    tabl[cpt_pkt]=1 ;
-                }
-                else if((size=IP_send(pdu,addr))==-1) {
-                    printf("pkt_loss au moment du send \n") ;
-                    exit(1) ; //continue;
-                }
-            }
-            else if (pdu2.header.ack_num != PE){
-                if (somme(tabl, FENETRE)<(taux_accept)){
                     tabl[cpt_pkt]=1 ;
                     boolean = 0 ;
                 }
@@ -214,16 +208,35 @@ void process_received_PDU(mic_tcp_pdu pdu, mic_tcp_sock_addr addr)
     pdu2.header.ack_num=pdu.header.seq_num ;
     pdu2.header.source_port=9000 ;
     pdu2.header.dest_port=5000 ;
-    if (IP_send(pdu2,addr)==-1){
-        printf("pkt_loss au moment du send\n") ;
-        exit(1);
-    }
-    if (pdu2.header.ack_num == PA){
-        PA+=pdu2.header.ack_num-PA+1 ;
-        app_buffer_put(pdu.payload) ;
-    }
     
     printf("[MIC-TCP] Appel de la fonction: "); printf(__FUNCTION__); printf("\n");
+
+    switch (sock.state){
+        case IDLE : 
+            if(pdu.header.syn && !pdu.header.ack) {
+                pdu.header.ack=1 ;
+                sock.state=ESTABLISHED ;
+                IP_send(pdu, addr) ;
+            }
+            break ;
+        case ESTABLISHED :
+            if(pdu.header.syn && !pdu.header.ack) {
+                pdu.header.ack=1 ;
+                IP_send(pdu, addr) ;
+            }
+            else if (IP_send(pdu2,addr)==-1){
+                    printf("pkt_loss au moment du send\n") ;
+                    exit(1);
+            }
+            else if (pdu2.header.ack_num == PA && !pdu.header.ack){
+                    PA+=pdu2.header.ack_num-PA+1 ;
+                    app_buffer_put(pdu.payload) ;
+            }
+            break ;
+
+        default : 
+            break ;
+    }
 
     //pdu récu
 
